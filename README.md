@@ -1,1 +1,1 @@
-# -Simulacion-modelo-Erd-s-R-nyi
+# Simulacion-modelo-Erd-s-R-nyi
