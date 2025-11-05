@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulación del Modelo Erdős-Rényi</title>
+    <!-- Carga de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carga de D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Estilos base para una mejor visualización */
+        html, body {
+            height: 100%;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Evita el scroll de la página */
+        }
+        /* Estilos para los enlaces (aristas) */
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+        }
+        /* Estilos para los nodos (vértices) */
+        .node {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+        /* Color para el componente gigante */
+        .node.giant {
+            fill: #e11d48; /* Rojo */
+        }
+        /* Color para otros componentes */
+        .node.other {
+            fill: #71717a; /* Gris */
+        }
+        /* Contenedor de la simulación para que ocupe el espacio disponible */
+        #simulation-wrapper {
+            flex-grow: 1;
+            position: relative;
+        }
+        svg {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-gray-100">
+
+    <!-- Encabezado y Controles -->
+    <header class="p-4 bg-gray-800 shadow-lg z-10">
+        <h1 class="text-2xl font-bold text-center text-cyan-400 mb-4">Simulación del Modelo Erdős-Rényi (G(N, p))</h1>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-6xl mx-auto">
+            
+            <!-- Controles -->
+            <div class="bg-gray-700 p-4 rounded-lg shadow-inner">
+                <label for="n-slider" class="block text-sm font-medium mb-1">Número de Nodos (N): <span id="n-value" class="font-bold text-white">100</span></label>
+                <input type="range" id="n-slider" min="10" max="300" value="100" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            </div>
+            
+            <div class="bg-gray-700 p-4 rounded-lg shadow-inner">
+                <label for="c-slider" class="block text-sm font-medium mb-1">Grado Promedio (c): <span id="c-value" class="font-bold text-white">0.5</span></label>
+                <input type="range" id="c-slider" min="0" max="5" step="0.05" value="0.5" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <!-- Botón de Generar -->
+            <div class="flex items-center justify-center">
+                <button id="generate-button" class="w-full md:w-auto bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-colors duration-200">
+                    Generar / Regenerar Red
+                </button>
+            </div>
+
+            <!-- Información -->
+            <div class="md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 text-center">
+                <div class="bg-gray-800 p-3 rounded-lg">
+                    <span class="block text-xs text-cyan-300 uppercase">Probabilidad (p)</span>
+                    <span id="p-value" class="text-lg font-semibold">0.005</span>
+                </div>
+                <div class="bg-gray-800 p-3 rounded-lg">
+                    <span class="block text-xs text-cyan-300 uppercase">Umbral (1/N)</span>
+                    <span id="threshold-value" class="text-lg font-semibold">0.010</span>
+                </div>
+                <div class="bg-gray-800 p-3 rounded-lg">
+                    <span class="block text-xs text-cyan-300 uppercase">Nro. Componentes</span>
+                    <span id="components-value" class="text-lg font-semibold">...</span>
+                </div>
+                <div class="bg-gray-800 p-3 rounded-lg">
+                    <span class="block text-xs text-cyan-300 uppercase">Comp. más Grande</span>
+                    <span id="largest-comp-value" class="text-lg font-semibold">...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Área de Simulación -->
+    <main id="simulation-wrapper">
+        <svg></svg>
+        <div id="loading-spinner" class="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75" style="display: none;">
+             <svg class="animate-spin h-10 w-10 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+    </main>
+
+    <script type="module">
+        // --- Configuración Inicial ---
+        const nSlider = document.getElementById('n-slider');
+        const cSlider = document.getElementById('c-slider');
+        const nValueSpan = document.getElementById('n-value');
+        const cValueSpan = document.getElementById('c-value');
+        const pValueSpan = document.getElementById('p-value');
+        const thresholdValueSpan = document.getElementById('threshold-value');
+        const componentsValueSpan = document.getElementById('components-value');
+        const largestCompValueSpan = document.getElementById('largest-comp-value');
+        const generateButton = document.getElementById('generate-button');
+        const loadingSpinner = document.getElementById('loading-spinner');
+
+        const svg = d3.select("svg");
+        const wrapper = document.getElementById('simulation-wrapper');
+        
+        let width, height;
+        let simulation;
+        let link, node;
+
+        function resize() {
+            width = wrapper.clientWidth;
+            height = wrapper.clientHeight;
+            svg.attr("width", width).attr("height", height);
+            if (simulation) {
+                simulation.force("center", d3.forceCenter(width / 2, height / 2));
+                simulation.alpha(0.3).restart();
+            }
+        }
+
+        window.addEventListener('resize', resize);
+        resize(); // Llama inicial
+
+        // --- Simulación D3 ---
+        simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id).distance(50).strength(0.1))
+            .force("charge", d3.forceManyBody().strength(-100)) // Nodos se repelen
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .on("tick", ticked);
+
+        function ticked() {
+            if (link) {
+                link.attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+            }
+            if (node) {
+                node.attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+            }
+        }
+
+        // --- Lógica del Grafo ---
+
+        /**
+         * Genera un grafo aleatorio G(N, p).
+         * @param {number} N - Número de nodos.
+         * @param {number} p - Probabilidad de arista.
+         * @returns {{nodes: Array, links: Array}}
+         */
+        function generateGraph(N, p) {
+            const nodes = d3.range(N).map(i => ({id: i, component: null}));
+            const links = [];
+            for (let i = 0; i < N; i++) {
+                for (let j = i + 1; j < N; j++) {
+                    if (Math.random() < p) {
+                        links.push({source: i, target: j});
+                    }
+                }
+            }
+            return { nodes, links };
+        }
+
+        /**
+         * Encuentra componentes conectados usando DFS (Depth-First Search).
+         * @param {Array} nodes - Array de nodos.
+         * @param {Array} links - Array de aristas.
+         * @returns {{numComponents: number, largestComponentSize: number, componentMap: Map}}
+         */
+        function findComponents(nodes, links) {
+            const adj = new Map(nodes.map(n => [n.id, []]));
+            links.forEach(link => {
+                const sourceId = link.source.id ?? link.source;
+                const targetId = link.target.id ?? link.target;
+                adj.get(sourceId).push(targetId);
+                adj.get(targetId).push(sourceId);
+            });
+
+            const visited = new Set();
+            const components = [];
+
+            function dfs(nodeId, currentComponent) {
+                visited.add(nodeId);
+                currentComponent.push(nodeId);
+                adj.get(nodeId).forEach(neighborId => {
+                    if (!visited.has(neighborId)) {
+                        dfs(neighborId, currentComponent);
+                    }
+                });
+            }
+
+            nodes.forEach(node => {
+                if (!visited.has(node.id)) {
+                    const currentComponent = [];
+                    dfs(node.id, currentComponent);
+                    components.push(currentComponent);
+                }
+            });
+
+            if (components.length === 0) {
+                if (nodes.length > 0) {
+                     // Caso especial: N nodos, 0 aristas
+                    const componentMap = new Map(nodes.map((n, i) => [n.id, i]));
+                    return { numComponents: nodes.length, largestComponentSize: 1, componentMap, largestComponentIndex: 0 };
+                }
+                return { numComponents: 0, largestComponentSize: 0, componentMap: new Map(), largestComponentIndex: -1 };
+            }
+
+            const largestComponentSize = Math.max(...components.map(c => c.length));
+            const largestComponentIndex = components.findIndex(c => c.length === largestComponentSize);
+            
+            const componentMap = new Map();
+            components.forEach((component, index) => {
+                component.forEach(nodeId => {
+                    componentMap.set(nodeId, index);
+                });
+            });
+
+            return {
+                numComponents: components.length,
+                largestComponentSize: largestComponentSize,
+                componentMap: componentMap,
+                largestComponentIndex: largestComponentIndex
+            };
+        }
+
+        /**
+         * Función principal para actualizar y dibujar la simulación.
+         */
+        async function runSimulation() {
+            loadingSpinner.style.display = 'flex';
+            
+            // Pausa breve para que el spinner sea visible
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            svg.selectAll("*").remove(); // Limpia SVG anterior
+
+            const N = +nSlider.value;
+            const c = +cSlider.value;
+            const p = N > 1 ? c / (N - 1) : 0;
+            const threshold = N > 0 ? 1 / N : 0;
+            
+            // Actualiza UI
+            nValueSpan.textContent = N;
+            cValueSpan.textContent = c.toFixed(2);
+            pValueSpan.textContent = p.toFixed(4);
+            thresholdValueSpan.textContent = threshold.toFixed(4);
+            componentsValueSpan.textContent = '...';
+            largestCompValueSpan.textContent = '...';
+
+            const { nodes, links } = generateGraph(N, p);
+            
+            // Analiza componentes
+            const { numComponents, largestComponentSize, componentMap, largestComponentIndex } = findComponents(nodes, links);
+            
+            // Asigna el ID del componente a cada nodo para colorear
+            nodes.forEach(node => {
+                node.componentIndex = componentMap.get(node.id);
+            });
+
+            // Actualiza UI con resultados
+            componentsValueSpan.textContent = numComponents;
+            largestCompValueSpan.textContent = `${largestComponentSize} (${(100 * largestComponentSize / N).toFixed(1)}%)`;
+
+            // --- Dibuja la nueva red ---
+            
+            // Grupo para enlaces
+            link = svg.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(links)
+                .enter().append("line")
+                .attr("class", "link");
+
+            // Grupo para nodos
+            node = svg.append("g")
+                .attr("class", "nodes")
+                .selectAll("circle")
+                .data(nodes)
+                .enter().append("circle")
+                .attr("r", 5)
+                .attr("class", d => d.componentIndex === largestComponentIndex ? "node giant" : "node other")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            node.append("title")
+                .text(d => `Nodo: ${d.id}\nComponente: ${d.componentIndex}`);
+
+            // Reinicia la simulación con los nuevos datos
+            simulation.nodes(nodes);
+            simulation.force("link").links(links);
+            simulation.alpha(1).restart(); // Calienta la simulación
+            
+            loadingSpinner.style.display = 'none';
+        }
+
+        // --- Funciones de Arrastre (Drag) ---
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // --- Event Listeners ---
+        function updateInfo() {
+            const N = +nSlider.value;
+            const c = +cSlider.value;
+            const p = N > 1 ? c / (N - 1) : 0;
+            const threshold = N > 0 ? 1 / N : 0;
+
+            nValueSpan.textContent = N;
+            cValueSpan.textContent = c.toFixed(2);
+            pValueSpan.textContent = p.toFixed(4);
+            thresholdValueSpan.textContent = threshold.toFixed(4);
+        }
+
+        nSlider.addEventListener('input', updateInfo);
+        cSlider.addEventListener('input', updateInfo);
+        generateButton.addEventListener('click', runSimulation);
+
+        // --- Ejecución Inicial ---
+        updateInfo();
+        runSimulation();
+
+    </script>
+</body>
+</html>
